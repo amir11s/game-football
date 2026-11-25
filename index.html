@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ضربات ایستگاهی</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{height:100%;overflow:hidden;background:#071426;font-family:Vazirmatn,Tahoma,sans-serif;color:#fff;touch-action:none}
+canvas{display:block}
+#gl,#c{position:fixed;inset:0;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:safe center;gap:12px;padding:18px;overflow-y:auto;touch-action:pan-y;background:linear-gradient(rgba(5,14,32,.82),rgba(5,22,20,.93))}
+.screen.on{display:flex}
+h1{font-size:28px;color:#ffd54a;text-shadow:0 3px 10px #000;text-align:center}
+h2{font-size:19px;text-align:center}
+button{font-family:inherit;color:#fff;border:0;border-radius:14px;padding:13px;font-size:16px;width:100%;max-width:370px;background:linear-gradient(#25406e,#172a4c);box-shadow:0 4px 0 #0a1428;border:1px solid #ffffff22}
+button:active{transform:translateY(2px)}
+button.main{background:linear-gradient(#27b463,#137a40);font-weight:bold;font-size:18px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dot{width:24px;height:24px;border-radius:50%;border:2px solid #fff;flex:none}
+.stat{background:#0007;border-radius:8px;padding:3px 9px;color:#ffd54a;font-weight:bold}
+#hud{position:fixed;top:8px;left:8px;right:8px;display:none;pointer-events:none;text-align:center}
+#score{display:flex;justify-content:center;align-items:center;gap:8px;background:#081327e0;border-radius:14px;padding:8px;font-size:14px;font-weight:bold}
+#score b{font-size:22px;color:#ffd54a;min-width:64px;direction:ltr}
+.marks{display:flex;justify-content:space-between;margin-top:5px;font-size:13px}
+.marks span{background:#000a;border-radius:10px;padding:2px 8px;direction:ltr;letter-spacing:2px}
+#info:empty{display:none}
+#info{display:inline-block;background:#000a;border-radius:10px;padding:3px 10px;margin-top:6px;font-size:13px;text-shadow:0 1px 4px #000,0 0 3px #000}
+#msg{position:fixed;top:44%;width:100%;text-align:center;font-size:44px;font-weight:900;pointer-events:none;text-shadow:0 4px 0 #000,0 0 22px #000;opacity:0;transform:scale(.4);transition:.25s}
+#msg.on{opacity:1;transform:scale(1)}
+#spin{position:fixed;right:10px;bottom:10px;display:none;text-align:center;font-size:11px;text-shadow:0 1px 3px #000}
+#spin canvas{width:104px;height:104px;display:block;touch-action:none}
+#power{position:fixed;left:12px;bottom:14px;width:18px;height:130px;border-radius:10px;background:#000a;border:2px solid #fff8;display:none;overflow:hidden}
+#power i{position:absolute;bottom:0;width:100%;height:0;background:linear-gradient(to top,#2ecc71,#f1c40f,#e74c3c);background-size:100% 130px;background-position:bottom}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="c"></canvas>
+<div id="hud">
+ <div id="score"><span id="na">مهندسی الف</span><b id="sc">0 - 0</b><span id="nb"></span></div>
+ <div class="marks"><span id="ma"></span><span id="mb"></span></div>
+ <div id="info"></div>
+</div>
+<div id="msg"></div>
+<div id="spin"><canvas width="208" height="208"></canvas>نقطه ضربه به توپ</div>
+<div id="power"><i></i></div>
+<div class="screen on" id="menu"></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const players=[
+ {n:'احمد قنواتی',fk:80,pk:90,num:7},
+ {n:'امیر سالمی',fk:89,pk:81,num:10},
+ {n:'ابوالفضل کاظمی',fk:89,pk:83,num:8},
+ {n:'سروش خداکرم زاده',fk:84,pk:84,num:9},
+ {n:'محمد ممبینی',fk:82,pk:86,num:11}];
+const home={n:'مهندسی الف',shirt:'#f7f8fa',short:'#101114',sock:'#101114'};
+const teams=[
+ {n:'علوم ورزشی',shirt:'#d62f2f',short:'#fff',sock:'#d62f2f',r:84},
+ {n:'علوم تربیتی',shirt:'#8e44ad',short:'#4a235a',sock:'#fff',r:72},
+ {n:'اقتصاد',shirt:'#1e8f4e',short:'#fff',sock:'#1e8f4e',r:76},
+ {n:'عمران',shirt:'#f28c18',short:'#22252b',sock:'#f28c18',r:80},
+ {n:'مهندسی ب',shirt:'#1f5fd1',short:'#0d2b66',sock:'#1f5fd1',r:82},
+ {n:'دامپزشکی',shirt:'#12a8b5',short:'#075d66',sock:'#12a8b5',r:74},
+ {n:'کشاورزی',shirt:'#e5c21b',short:'#1f6b2c',sock:'#1f6b2c',r:70}];
+const modes={pen:'فقط پنالتی',fk:'فقط ضربه ایستگاهی',mix:'ترکیبی'};
+
+/* ---------- صدا ---------- */
+let ac;
+function audio(){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume()}catch(e){}}
+function noise(d,f,v,att){if(!ac)return;const b=ac.createBuffer(1,ac.sampleRate*d,ac.sampleRate),a=b.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=Math.random()*2-1;
+ const s=ac.createBufferSource(),fl=ac.createBiquadFilter(),g=ac.createGain(),t=ac.currentTime;s.buffer=b;fl.type='lowpass';fl.frequency.value=f;
+ g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(v,t+att);g.gain.exponentialRampToValueAtTime(.001,t+d);s.connect(fl).connect(g).connect(ac.destination);s.start()}
+function whistle(){if(!ac)return;const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;o.type='square';o.frequency.value=2300;g.gain.setValueAtTime(.05,t);g.gain.exponentialRampToValueAtTime(.001,t+.45);o.connect(g).connect(ac.destination);o.start();o.stop(t+.45)}
+const kickSound=()=>noise(.18,500,.9,.005),cheer=()=>noise(2.2,1600,.5,.25),ooh=()=>noise(1.1,600,.35,.2);
+
+/* ---------- دوربین ---------- */
+const cv=$('#c'),g=cv.getContext('2d');
+let W,H,F=500,HZ=200,cam={x:0,y:2,z:20},fw={x:0,z:-1},rt={x:1,z:0},bg;
+function resize(){const d=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*d;cv.height=H*d;g.setTransform(d,0,0,d,0,0);glc.width=W*d;glc.height=H*d;setCam()}
+function setCam(){const b=S.ball,l=Math.hypot(b.x,b.z),ux=b.x/l,uz=b.z/l,far=Math.max(0,l-11),back=5.8+far*.65;
+ cam={x:b.x+ux*back,y:2.1+far*.12,z:b.z+uz*back};fw={x:-ux,z:-uz};rt={x:uz,z:-ux};
+ F=Math.min(W,H*.58)*.8*(l+back)/7.32;HZ=H*.74-cam.y*F/back}
+function toCam(x,y,z){const dx=x-cam.x,dz=z-cam.z;return{s:dx*rt.x+dz*rt.z,y,d:dx*fw.x+dz*fw.z}}
+const scr=c=>({x:W/2+c.s*F/c.d,y:HZ-(c.y-cam.y)*F/c.d,k:F/c.d});
+const P=(x,y,z)=>scr(toCam(x,y,z));
+
+/* ---------- موتور گرافیک سه‌بعدی (WebGL2) ---------- */
+const glc=$('#gl'),gl=glc.getContext('webgl2',{antialias:true,alpha:false,powerPreference:'high-performance'});
+const VS=`#version 300 es
+precision highp float;
+layout(location=0)in vec3 ap;layout(location=1)in vec3 an;layout(location=2)in vec2 auv;
+uniform int kind;uniform vec3 A,B,X,Z,R;uniform mat3 rot;
+uniform vec3 camP,fw,rt;uniform vec4 proj;uniform bool depthPass;uniform vec4 lbox;uniform vec3 LX,LY,LZ;
+out vec3 wp,nr,op;out vec2 uv;
+void main(){
+ vec3 p=ap,n=an;
+ if(kind==1){ /* کپسول: auv.x انتها */
+  float e=auv.x,r=mix(R.x,R.y,e);vec3 d=normalize(B-A);vec3 x=normalize(X-d*dot(X,d));vec3 z=cross(x,d);
+  p=mix(A,B,e)+x*an.x*r+d*an.y*r*R.z+z*an.z*r*Z.x;n=normalize(x*an.x+d*an.y/max(R.z,.2)+z*an.z/Z.x);}
+ else if(kind==2){p=A+rot*(ap*R);n=rot*normalize(an/R);}
+ wp=p;nr=n;op=ap;uv=auv;
+ if(depthPass){vec3 q=p-lbox.xyz;gl_Position=vec4(dot(q,LX)/lbox.w,dot(q,LY)/lbox.w,-dot(q,LZ)/60.,1);return;}
+ vec3 q=p-camP;float s=dot(q,rt),d=dot(q,fw);
+ gl_Position=vec4(proj.x*s,proj.y*q.y+proj.z*d,1.002*d-.6,d);
+}`;
+const FS=`#version 300 es
+precision highp float;
+precision highp sampler2DShadow;
+in vec3 wp,nr,op;in vec2 uv;out vec4 o;
+uniform int mat;uniform vec4 col;uniform sampler2D tex;uniform sampler2DShadow smap;uniform vec3 camP,LX,LY,LZ;uniform vec4 lbox;uniform bool depthPass;uniform float time;
+float h(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.),f.x),f.y);}
+float shadow(){vec3 q=wp-lbox.xyz;vec3 c=vec3(dot(q,LX)/lbox.w,dot(q,LY)/lbox.w,-dot(q,LZ)/60.)*.5+.5;
+ if(c.x<0.||c.x>1.||c.y<0.||c.y>1.)return 1.;float s=0.;for(int i=-2;i<=2;i++)for(int j=-2;j<=2;j++)s+=texture(smap,vec3(c.xy+vec2(i,j)/1700.,c.z-.0016));return s/25.;}
+float seg(float d,float w){float a=fwidth(d)+1e-4;return 1.-smoothstep(w-a,w+a,abs(d));}
+float rectL(vec2 p,float x,float z){float v=seg(abs(p.x)-x,.06)*step(-.06,p.y)*step(p.y,z+.06);return max(v,seg(p.y-z,.06)*step(abs(p.x),x+.06));}
+void main(){
+ if(depthPass){o=vec4(1);return;}
+ vec3 N=normalize(nr),V=normalize(camP-wp);
+ if(mat==3){o=texture(tex,uv)*col;if(o.a<.02)discard;return;}
+ if(mat==4){float d=length(uv-.5)*2.;o=vec4(col.rgb,col.a*(pow(max(0.,1.-d),3.)+smoothstep(.12,0.,d)));return;}
+ vec3 base=col.rgb;float spec=.08,pw=16.,rim=.25;
+ if(mat==1){ /* چمن */
+  vec2 p=wp.xz;float far=clamp(length(p-camP.xz)/45.,0.,1.);
+  float stripe=mod(floor(p.y/2.75),2.),cross_=mod(floor((p.x+1.4)/5.5),2.);
+  float blades=vn(p*vec2(38,17))*.6+vn(p*vec2(91,53))*.4;
+  base=mix(vec3(.09,.30,.07),vec3(.145,.42,.095),stripe*.8+cross_*.2);
+  base*=1.+(blades-.5)*.55*(1.-far)+(vn(p*3.1)-.5)*.22+(vn(p*.45)-.5)*.22;
+  base=mix(base,vec3(.30,.24,.12),smoothstep(.62,.9,vn(p*1.7))*smoothstep(3.5,0.,length(p-vec2(0,1.5)))*.7);
+  float l=0.;if(p.y>-.07){l=max(seg(p.y,.06)*step(abs(p.x),34.),rectL(p,20.16,16.5));l=max(l,rectL(p,9.16,5.5));
+   l=max(l,seg(length(p-vec2(0,11))-9.15,.06)*step(16.5,p.y));l=max(l,1.-smoothstep(.11,.13,length(p-vec2(0,11))));l=max(l,seg(abs(p.x)-34.,.06));}
+  base=mix(base,vec3(.88,.92,.86)*(.9+blades*.15),l*.93);spec=.02;rim=0.;N=vec3(0,1,0);}
+ if(mat==2){ /* توپ */
+  vec3 d=normalize(op);float t=1.618034;vec3 v[12]=vec3[](vec3(-1,t,0),vec3(1,t,0),vec3(-1,-t,0),vec3(1,-t,0),vec3(0,-1,t),vec3(0,1,t),vec3(0,-1,-t),vec3(0,1,-t),vec3(t,0,-1),vec3(t,0,1),vec3(-t,0,-1),vec3(-t,0,1));
+  float a=-1.,b=-1.;for(int i=0;i<12;i++){float c=dot(d,normalize(v[i]));if(c>a){b=a;a=c;}else if(c>b)b=c;}
+  base=mix(vec3(.94),vec3(.03,.035,.05),smoothstep(.935,.942,a));base*=1.-.45*(1.-smoothstep(0.,.008,a-b));spec=.55;pw=45.;}
+ if(mat==5){base*=.93+.14*vn(wp.xy*140.+wp.z*90.);base*=.94+.1*vn(vec2(wp.x*9.+wp.z*7.,wp.y*22.));}
+ if(mat==6){spec=.7;pw=50.;}
+ if(mat==7){spec=.14;pw=14.;base*=.97+.06*vn(wp.xy*60.);}
+ float sh=shadow();
+ vec3 L=LZ,L2=normalize(vec3(-.7,.5,.35));
+ float df=max(dot(N,L),0.),wrap=max(0.,(dot(N,L)+.3)/1.3);
+ vec3 amb=mix(vec3(.20,.24,.20),vec3(.46,.55,.72),N.y*.5+.5);
+ vec3 c=base*(amb+vec3(1.,.96,.88)*mix(df,wrap,.35)*.92*mix(.3,1.,sh)+vec3(.45,.6,1.)*max(dot(N,L2),0.)*.28);
+ c+=spec*pow(max(dot(N,normalize(L+V)),0.),pw)*sh;
+ c+=vec3(.5,.65,1.)*rim*pow(1.-max(dot(N,V),0.),3.)*max(N.y*.5+.5,0.)*.6;
+ float fog=smoothstep(35.,110.,length(wp-camP));c=mix(c,vec3(.10,.17,.30),fog*.6);
+ c=c/(1.+c*.12)*1.1;o=vec4(c,col.a);
+}`;
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(o));return o}
+let U={},mesh={},TX={},SM,SFB,prog;
+function mk(data,mode,dyn){const v=gl.createVertexArray(),b=gl.createBuffer();gl.bindVertexArray(v);gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),dyn?gl.DYNAMIC_DRAW:gl.STATIC_DRAW);
+ [[3,0],[3,12],[2,24]].forEach(([n,off],i)=>{gl.enableVertexAttribArray(i);gl.vertexAttribPointer(i,n,gl.FLOAT,false,32,off)});return{v,b,n:data.length/8,mode:mode??gl.TRIANGLES}}
+function grid(nu,nv,f){const d=[];for(let i=0;i<nu;i++)for(let j=0;j<nv;j++)for(const[a,b]of[[0,0],[1,0],[1,1],[0,0],[1,1],[0,1]])d.push(...f((i+a)/nu,(j+b)/nv));return d}
+const quadData=(a,b,c,d,n=[0,0,1],u=1,v=1)=>[[a,0,v],[b,u,v],[c,u,0],[a,0,v],[c,u,0],[d,0,0]].flatMap(([p,s,t])=>[...p,...n,s,t]);
+function canvasTex(w,h,fn,rep){const c=document.createElement('canvas');c.width=w;c.height=h;fn(c.getContext('2d'),w,h);const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);gl.generateMipmap(gl.TEXTURE_2D);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);for(const k of[gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T])gl.texParameteri(gl.TEXTURE_2D,k,rep?gl.REPEAT:gl.CLAMP_TO_EDGE);return t}
+function initGL(){
+ prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(prog));gl.useProgram(prog);
+ for(const n of'kind A B X Z R rot camP fw rt proj depthPass lbox LX LY LZ mat col tex smap time'.split(' '))U[n]=gl.getUniformLocation(prog,n);
+ const PI=Math.PI,sph=(u,v,e)=>{const a=u*2*PI,b=(v-.5)*PI,n=[Math.cos(b)*Math.cos(a),Math.sin(b),Math.cos(b)*Math.sin(a)];return[...n,...n,e??0,v]};
+ mesh.sph=mk(grid(28,18,(u,v)=>sph(u,v)));
+ mesh.cap=mk([...grid(16,5,(u,v)=>sph(u,v*.5,0)),...grid(16,1,(u,v)=>sph(u,.5,v)),...grid(16,5,(u,v)=>sph(u,.5+v*.5,1))]);
+ mesh.ground=mk(quadData([-60,0,70],[60,0,70],[60,0,-9],[-60,0,-9],[0,1,0]));
+ /* سکوها */
+ const stand=(y0,z0,y1,z1,u)=>mk(quadData([-48,y0,z0],[48,y0,z0],[48,y1,z1],[-48,y1,z1],[0,0,1],u,1));
+ mesh.low=stand(1.1,-9,7,-17,2);mesh.up=stand(8.6,-18.5,15.5,-27,2.4);
+ mesh.board=mk(quadData([-42,0,-7],[42,0,-7],[42,1.05,-7],[-42,1.05,-7],[0,0,1],3,1));
+ mesh.fascia=mk([...quadData([-48,7,-17],[48,7,-17],[48,8.6,-18.5],[-48,8.6,-18.5],[0,.4,1]),...quadData([-48,15.5,-27],[48,15.5,-27],[48,17,-24],[-48,17,-24],[0,-1,.3]),...quadData([-48,0,-9],[48,0,-9],[48,1.1,-9],[-48,1.1,-9])]);
+ mesh.bulb=mk(quadData([-.5,-.5,0],[.5,-.5,0],[.5,.5,0],[-.5,.5,0]));
+ mesh.num=mk(quadData([0,0,0],[0,0,0],[0,0,0],[0,0,0]),null,true);
+ mesh.net=mk(new Array(8).fill(0),gl.LINES,true);
+ const crowdTex=seed=>canvasTex(1024,256,(c,w,h)=>{c.fillStyle='#10172a';c.fillRect(0,0,w,h);const cols=['#b33a3a','#2e5aa8','#e8e4da','#222833','#2f7d52','#c99a2e','#6b4a8a','#444c5c','#7a8499','#a8552d'];
+  for(let row=0;row<20;row++){const y=8+row*13;c.fillStyle='#050913';c.fillRect(0,y+8,w,3);
+   for(let x=-4;x<w;x+=9.5){if(x%190<10)continue;if(Math.random()<.06)continue;const px=x+Math.random()*4,py=y+Math.random()*3;
+    c.fillStyle=cols[Math.random()*cols.length|0];c.beginPath();c.ellipse(px,py+6,4.6,6,0,0,7);c.fill();
+    if(Math.random()<.14){c.strokeStyle=c.fillStyle;c.lineWidth=2;c.beginPath();c.moveTo(px-3,py+4);c.lineTo(px-6,py-5);c.moveTo(px+3,py+4);c.lineTo(px+6,py-5);c.stroke()}
+    c.fillStyle=['#c99673','#a8744f','#ddb191','#8a5c3e'][Math.random()*4|0];c.beginPath();c.arc(px,py-1,3,0,7);c.fill();c.fillStyle='#1a110c';c.beginPath();c.arc(px,py-2,3,3.1,6.3);c.fill()}}
+  c.fillStyle='#8c96a8';for(let x=0;x<w;x+=190)c.fillRect(x+3,0,2,h);const gr=c.createLinearGradient(0,0,0,h);gr.addColorStop(0,'#02061299');gr.addColorStop(.6,'#02061222');gr.addColorStop(1,'#02061255');c.fillStyle=gr;c.fillRect(0,0,w,h)},true);
+ TX.c1=crowdTex();TX.c2=crowdTex();
+ TX.ads=canvasTex(2048,64,(c,w,h)=>{[['لیگ دانشکده‌ها','#0b3d91','#fff'],['مهندسی الف','#f2f2f2','#101114'],['ضربات ایستگاهی','#b3121f','#fff'],['بازی جوانمردانه','#0d6b4f','#ffe27a']].forEach(([t,a,b],i)=>{const x=i*512;const q=c.createLinearGradient(0,0,0,h);q.addColorStop(0,a);q.addColorStop(1,'#000');c.fillStyle=a;c.fillRect(x,0,512,h);c.globalAlpha=.25;c.fillStyle=q;c.fillRect(x,0,512,h);c.globalAlpha=1;c.fillStyle=b;c.font='bold 40px Tahoma,sans-serif';c.textAlign='center';c.textBaseline='middle';c.direction='rtl';c.fillText(t,x+256,34)})},true);
+ for(let i=1;i<=11;i++)for(const dark of[0,1])TX['n'+i+dark]=canvasTex(128,128,c=>{c.font='bold 92px Arial,sans-serif';c.textAlign='center';c.textBaseline='middle';c.lineWidth=7;c.strokeStyle=dark?'#fff':'#000a';c.fillStyle=dark?'#111':'#fff';c.strokeText(i,64,68);c.fillText(i,64,68)});
+ SM=gl.createTexture();gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,SM);gl.texImage2D(gl.TEXTURE_2D,0,gl.DEPTH_COMPONENT24,1536,1536,0,gl.DEPTH_COMPONENT,gl.UNSIGNED_INT,null);
+ for(const[k,v]of[[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE],[gl.TEXTURE_COMPARE_MODE,gl.COMPARE_REF_TO_TEXTURE]])gl.texParameteri(gl.TEXTURE_2D,k,v);
+ SFB=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,SFB);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.TEXTURE_2D,SM,0);gl.activeTexture(gl.TEXTURE0);
+ gl.uniform1i(U.tex,0);gl.uniform1i(U.smap,1);
+}
+const rgb=(h,a=1)=>{if(h.length<5)h='#'+[...h.slice(1)].map(c=>c+c).join('');return[parseInt(h.slice(1,3),16)/255,parseInt(h.slice(3,5),16)/255,parseInt(h.slice(5,7),16)/255,a]};
+let alpha=1;
+function put(m,mat,color,kind=0){gl.uniform1i(U.kind,kind);gl.uniform1i(U.mat,mat);const c=typeof color==='string'?rgb(color):color;gl.uniform4f(U.col,c[0],c[1],c[2],c[3]*alpha);gl.bindVertexArray(m.v);gl.drawArrays(m.mode,0,m.n)}
+function capsule(a,b,r1,r2,color,x=[1,0,0],depth=1,mat=7,round=1){gl.uniform3fv(U.A,a);gl.uniform3fv(U.B,b);gl.uniform3fv(U.X,x);gl.uniform3f(U.Z,depth,0,0);gl.uniform3f(U.R,r1,r2,round);put(mesh.cap,mat,color,1)}
+const I3=[1,0,0,0,1,0,0,0,1];
+function ball3(c,r,color,rot=I3,mat=7){gl.uniform3fv(U.A,c);gl.uniform3fv(U.R,r);gl.uniformMatrix3fv(U.rot,false,rot);put(mesh.sph,mat,color,2)}
+
+/* بازیکن: مبدا وسط بدن، محور x راست، y بالا، z جلو */
+function human(pos,face,kit,o={}){
+ const f=[face[0],0,face[1]],r=[f[2],0,-f[0]],a=o.a||0,ca=Math.cos(a),sa=Math.sin(a);
+ /* چرخش شیرجه حول محور عمق جهانی */
+ const turn=v=>[v[0]*ca+v[1]*sa,-v[0]*sa+v[1]*ca,v[2]];
+ const dir=v=>turn([r[0]*v[0]+f[0]*v[2],v[1],r[2]*v[0]+f[2]*v[2]]);
+ const W3=(x,y,z)=>{const d=dir([x,y,z]);return[pos[0]+d[0],pos[1]+d[1],pos[2]+d[2]]};
+ const X=dir([1,0,0]),skin=o.skin||'#c58e6b',hair='#17100c',run=o.run||0,sw=run?Math.sin(run):0;
+ const lerp3=(p,q,t)=>p.map((v,i)=>v+(q[i]-v)*t);
+ const C=(p,q,r1,r2,c,d,m,ro)=>capsule(p,q,r1,r2,c,X,d,m,ro);
+ for(const s of[-1,1]){const kick=s>0?(o.kick||0):0,lift=run?Math.max(0,s*Math.cos(run)):0;
+  const hip=W3(s*.105,-.07,0),kn=W3(s*(o.gk?.18:.125),-.47+lift*.12+kick*.14,s*sw*.27+kick*.3+(o.gk?.1:.015)),an=W3(s*(o.gk?.24:.14),-.85+lift*.24+kick*.38,s*sw*.5-lift*.12+kick*.66-.01);
+  C(lerp3(hip,kn,.48),kn,.075,.058,skin);C(hip,lerp3(hip,kn,.68),.105,.082,kit.short,1,5,.7);
+  C(kn,an,.06,.038,skin);const calf=lerp3(kn,an,.17);C(calf,lerp3(kn,an,.48),.062,.068,kit.sock,1.05,5,.8);C(lerp3(kn,an,.48),an,.068,.043,kit.sock,1,5,.6);
+  C(lerp3(kn,an,.2),lerp3(kn,an,.26),.065,.066,'#eeeeee',1.05,5,.2);
+  const d=an.map((v,i)=>v),toe=[d[0]+dir([0,0,.16])[0],d[1]+dir([0,-.045,.16])[1],d[2]+dir([0,0,.16])[2]];
+  C([d[0],d[1]-.025,d[2]],toe,.058,.042,s>0?'#e9f23c':'#e9f23c',.8,6);C([d[0],d[1]-.065,d[2]],[toe[0],toe[1]-.025,toe[2]],.045,.034,'#15161a',.8,6)}
+ C(W3(0,-.09,0),W3(0,.06,0),.175,.158,kit.short,.7,5,.55);
+ C(W3(0,.035,0),W3(0,.27,.005),.158,.182,kit.shirt,.66,5,.45);
+ C(W3(0,.25,.005),W3(0,.445,0),.18,.232,kit.shirt,.58,5,.42);
+ C(W3(-.15,.48,-.005),W3(.15,.48,-.005),.088,.088,kit.shirt,1,5);
+ C(W3(0,.035,0),W3(0,.065,0),.164,.164,kit.short,.69,5,.15);
+ for(const s of[-1,1]){let el,hd;
+  if(o.up){el=[s*.38,.72,.05];hd=[s*.31,1.02,.08]}
+  else if(o.wall){el=[s*.27,.19,.07];hd=[s*.055,-.04,.19]}
+  else if(o.gk){el=[s*.47,.28,.1];hd=[s*.62,.12,.3]}
+  else{el=[s*.37,.18,-s*sw*.2];hd=[s*.42,-.08,.05-s*sw*.38+(run?.14:0)]}
+  const sho=W3(s*.225,.455,0),E=W3(...el),H=W3(...hd);
+  C(lerp3(sho,E,.4),E,.054,.045,skin);C(sho,lerp3(sho,E,o.gk?1:.62),.076,.056,kit.shirt,1,5,.8);if(!o.gk)C(lerp3(sho,E,.57),lerp3(sho,E,.63),.061,.06,kit.short,1,5,.2);
+  C(E,H,.047,.029,o.gk?kit.shirt:skin);const tip=lerp3(E,H,1.27);C(H,tip,o.gk?.062:.034,o.gk?.07:.025,o.gk?'#eafff2':skin,.55,o.gk?6:7);
+  const th=lerp3(H,tip,.4);C(H,[th[0]-X[0]*s*.05,th[1]+.015,th[2]-X[2]*s*.05],.018,.012,o.gk?'#35e07a':skin)}
+ C(W3(0,.49,0),W3(0,.63,.012),.062,.053,skin);C(W3(0,.505,0),W3(0,.535,.002),.082,.07,kit.short,.85,5,.2);
+ const m=[...dir([1,0,0]),...dir([0,1,0]),...dir([0,0,1])],E=(x,y,z,rr,c,mt=7)=>ball3(W3(x,y,z),rr,c,m,mt);
+ E(0,.715,.012,[.101,.128,.112],skin);E(0,.675,.035,[.08,.075,.085],skin);
+ E(0,.762,-.008,[.111,.098,.121],hair,5);E(0,.725,-.032,[.108,.1,.09],hair,5);
+ for(const s of[-1,1]){E(s*.101,.705,0,[.016,.03,.022],skin);E(s*.037,.724,.113,[.017,.01,.008],'#f1eee8');E(s*.036,.724,.121,[.007,.008,.004],'#1b120c');E(s*.038,.745,.112,[.027,.007,.008],hair)}
+ E(0,.696,.122,[.016,.027,.019],skin);E(0,.655,.113,[.031,.008,.009],'#8d5148');
+ if(!o.clean)E(0,.638,.082,[.055,.03,.038],'#4a3023',5);
+ if(o.num&&!shadowing){ /* شماره پشت و جلو */
+  const dk=rgb(kit.shirt).slice(0,3).reduce((s,v)=>s+v)>2?1:0;
+  const face2=(z,w,y0,y1,flip)=>{const q=quadData(W3(-w*flip,y0,z),W3(w*flip,y0,z),W3(w*flip,y1,z),W3(-w*flip,y1,z),dir([0,0,Math.sign(z)]));gl.bindBuffer(gl.ARRAY_BUFFER,mesh.num.b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(q),gl.DYNAMIC_DRAW);gl.bindTexture(gl.TEXTURE_2D,TX['n'+o.num+dk]);put(mesh.num,3,[1,1,1,1])};
+  face2(-.15,.14,.13,.43,-1);face2(.158,.075,.25,.4,1)}
+}
+let shadowing=false;
+function netData(){const d=[],X=3.66,Y=2.44,D=2,k=S.shake;
+ const back=(x,y)=>{const e=Math.max(0,1-Math.abs(x/X)**8)*Math.max(0,1-(y/Y)**8),w=k>0?Math.sin(k*28)*k*.65*Math.exp(-((x-S.hit.x)**2+(y-S.hit.y)**2)*1.2):0;return[x,y,-D+(y/Y)**2*.55-w*e-Math.sin(Math.PI*y/Y)*.06]};
+ const L=(a,b)=>d.push(...a,0,0,1,0,0,...b,0,0,1,0,0);
+ const surf=(nu,nv,f)=>{for(let i=0;i<=nu;i++)for(let j=0;j<nv;j++)L(f(i/nu,j/nv),f(i/nu,(j+1)/nv));for(let j=0;j<=nv;j++)for(let i=0;i<nu;i++)L(f(i/nu,j/nv),f((i+1)/nu,j/nv))};
+ surf(52,18,(u,v)=>back(-X+u*2*X,v*Y));
+ surf(52,8,(u,v)=>{const x=-X+u*2*X,b=back(x,Y);return[x,Y+(b[1]-Y)*v-Math.sin(Math.PI*v)*.05,b[2]*v]});
+ for(const s of[-1,1])surf(11,18,(u,v)=>{const b=back(s*X,v*Y);return[s*X,v*Y,b[2]*u]});
+ return d}
+function ballRot(){const a=S.rot*.8,c=Math.cos(a),s=Math.sin(a),b=S.flight?S.flight.bend*.3:0,cb=Math.cos(a*b),sb=Math.sin(a*b);return[cb,0,-sb,sb*s,c,cb*s,sb*c,-s,cb*c]}
+function actors(){
+ const b=S.ball,k=S.gk;
+ if(k){const kit=!M||S.mine?{shirt:'#ff2f78',short:'#1b1d24',sock:'#ff2f78'}:{shirt:'#12c2a0',short:'#101114',sock:'#101114'};
+  human([k.cx,k.cy+(k.plan?0:Math.sin(time*5)*.025),.12],[0,1],kit,{a:k.a,gk:true,up:!!k.plan&&k.t>k.plan.delay,num:1})}
+ const w=S.wall;
+ if(w){const kit=!M?teams[0]:S.mine?M.t:home;for(let i=0;i<w.n;i++){const o=(i-(w.n-1)/2)*.58;human([w.x-w.uz*o,.93+w.j,w.z+w.ux*o],[-w.ux,-w.uz],kit,{wall:true,num:i+2,skin:['#c58e6b','#b07a58','#d09c79'][i%3],clean:i%2})}}
+ gl.bindTexture(gl.TEXTURE_2D,TX.c1);
+ ball3([b.x,b.y+.025,b.z],[.135,.135,.135],'#ffffff',ballRot(),2);
+}
+function kicker(){if(!M||S.state==='menu')return;
+ const run=S.state==='runup'?Math.min(1,S.t/1.3):['fly','after'].includes(S.state)?1:0;
+ const d=toCam(S.start.x,0,S.start.z).d-.15+(1-run)*1.5,side=-(Math.min(W,H*.58)*(.34-run*.18))*d/F,x=cam.x+fw.x*d+rt.x*side,z=cam.z+fw.z*d+rt.z*side;
+ human([x,.93,z],[fw.x,fw.z],S.mine?home:M.t,{run:S.state==='runup'?S.t*13:0,kick:S.kick,num:S.mine&&S.p&&S.state!=='idle'?S.p.num:10})}
+function render(){
+ const L=[.38,.82,.43],ll=Math.hypot(...L),Lz=L.map(v=>v/ll),Lx=[Lz[2],0,-Lz[0]].map(v=>v/Math.hypot(Lz[0],Lz[2])),Ly=[Lz[1]*Lx[2]-Lz[2]*Lx[1],Lz[2]*Lx[0]-Lz[0]*Lx[2],Lz[0]*Lx[1]-Lz[1]*Lx[0]];
+ const dist=S.start?Math.hypot(S.start.x,S.start.z):11;
+ gl.useProgram(prog);gl.uniform3fv(U.LX,Lx);gl.uniform3fv(U.LY,Ly);gl.uniform3fv(U.LZ,Lz);gl.uniform4f(U.lbox,(S.start?S.start.x:0)/2,0,(dist+4)/2,dist*.5+7);
+ gl.uniform3f(U.camP,cam.x,cam.y,cam.z);gl.uniform3f(U.fw,fw.x,0,fw.z);gl.uniform3f(U.rt,rt.x,0,rt.z);gl.uniform4f(U.proj,2*F/W,2*F/H,1-2*HZ/H,0);gl.uniform1f(U.time,time);
+ gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);alpha=1;
+ /* سایه */
+ shadowing=true;gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,null);gl.bindFramebuffer(gl.FRAMEBUFFER,SFB);gl.viewport(0,0,1536,1536);gl.clear(gl.DEPTH_BUFFER_BIT);gl.uniform1i(U.depthPass,1);gl.disable(gl.BLEND);
+ actors();kicker();for(const s of[-1,1])capsule([s*3.66,0,0],[s*3.66,2.44,0],.065,.065,'#fff');capsule([-3.66,2.44,0],[3.66,2.44,0],.065,.065,'#fff',[0,1,0]);
+ shadowing=false;gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,SM);gl.activeTexture(gl.TEXTURE0);gl.uniform1i(U.depthPass,0);
+ gl.viewport(0,0,glc.width,glc.height);gl.clearColor(.025,.055,.13,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+ gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.bindTexture(gl.TEXTURE_2D,TX.c1);
+ put(mesh.ground,1,'#ffffff');put(mesh.fascia,7,'#202b45');
+ const j=S.excite>0?Math.abs(Math.sin(time*13))*.18:0;
+ gl.uniform3f(U.A,0,0,0);
+ put(mesh.low,3,[1,1,1,1]);gl.bindTexture(gl.TEXTURE_2D,TX.c2);put(mesh.up,3,[.75+j,.75+j,.82+j,1]);
+ gl.bindTexture(gl.TEXTURE_2D,TX.ads);put(mesh.board,3,[1,1,1,1]);
+ actors();
+ for(const s of[-1,1]){capsule([s*3.66,0,0],[s*3.66,2.44,0],.065,.065,'#f4f6f8',[1,0,0],1,6);capsule([s*3.66,2.44,0],[s*3.66,2.0,-1.45],.022,.022,'#aab4c0');capsule([s*3.66,0,-2],[s*3.66,2.0,-1.45],.022,.022,'#aab4c0')}
+ capsule([-3.66,2.44,0],[3.66,2.44,0],.065,.065,'#f4f6f8',[0,1,0],1,6);
+ /* توپ‌های ردّ حرکت */
+ gl.depthMask(false);S.trail.forEach((t,i)=>ball3([t.x,t.y,t.z],[.11*i/12,.11*i/12,.11*i/12],[1,1,1,i*.012]));
+ const nd=netData();gl.bindBuffer(gl.ARRAY_BUFFER,mesh.net.b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(nd),gl.DYNAMIC_DRAW);mesh.net.n=nd.length/8;gl.bindTexture(gl.TEXTURE_2D,TX.c1);put(mesh.net,0,[.92,.95,1,.42]);
+ gl.depthMask(true);
+ /* زننده، هنگام پرواز توپ نیمه‌شفاف */
+ const ghost=S.state==='fly'||S.state==='after';
+ if(ghost){gl.colorMask(false,false,false,false);shadowing=true;kicker();shadowing=false;gl.colorMask(true,true,true,true);alpha=.3}kicker();alpha=1;
+ /* نورافکن‌ها */
+ gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.depthMask(false);
+ for(const x of[-17,-6,6,17])for(const[size,al]of[[9,.35],[2.6,.9]]){const q=quadData(...[[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,c])=>[x+rt.x*a*size/2,15.8+c*size/2,-23+rt.z*a*size/2]));gl.bindBuffer(gl.ARRAY_BUFFER,mesh.num.b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(q),gl.DYNAMIC_DRAW);put(mesh.num,4,[.8,.9,1,al])}
+ gl.depthMask(true);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.bindVertexArray(null);
+}
+glc.addEventListener('webglcontextlost',e=>e.preventDefault());
+glc.addEventListener('webglcontextrestored',()=>initGL());
+
+/* ---------- بازی ---------- */
+const S={state:'menu',ball:{x:0,y:.12,z:11},excite:0,shake:0,hit:{x:0,y:0},rot:0,spin:{x:0,y:0},trail:[],conf:[]};
+let M=null,time=0;
+const rnd=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),gauss=()=>(Math.random()+Math.random()+Math.random()-1.5)*1.4,lerp=(a,b,t)=>a+(b-a)*t;
+function screen(html){const m=$('#menu');m.innerHTML=html;m.classList.add('on');m.scrollTop=0}
+const hide=()=>$('#menu').classList.remove('on');
+function btn(html,fn,cls){const b=document.createElement('button');b.innerHTML=html;b.className=cls||'';b.onclick=()=>{audio();fn()};$('#menu').appendChild(b)}
+function mainMenu(){S.state='menu';M=null;ui(false);$('#hud').style.display='none';
+ screen('<h1>⚽ ضربات ایستگاهی</h1><h2>لیگ دانشکده‌ها</h2><p>تیم شما: <b>مهندسی الف</b></p>');
+ for(const k in modes)btn(modes[k],()=>pickTeam(k),k==='mix'?'main':'');
+ btn('راهنما',help)}
+function help(){screen('<h2>راهنما</h2><p style="max-width:360px;line-height:2.1">۱. انگشت را روی توپ بگذار و تا نقطه‌ای از دروازه که هدف توست بکش.<br>۲. سرعت کشیدن، قدرت شوت است. ضربه خیلی محکم دقت را کم می‌کند.<br>۳. توپ کوچک پایین صفحه: ضربه به <b>راست</b> توپ، آن را به چپ می‌چرخاند (و برعکس). ضربه به <b>پایین</b> توپ، آن را بلند می‌کند و ضربه به بالا، زمینی و تند.<br>۴. نوبت حریف: بعد از شوت، روی جایی که توپ می‌رود بزن تا دروازه‌بان شیرجه بزند.</p>');btn('برگشت',mainMenu,'main')}
+function pickTeam(mode){screen('<h2>رقیب را انتخاب کن</h2>');
+ teams.forEach(t=>btn(`<div class="row"><span class="dot" style="background:${t.shirt}"></span><span>${t.n}</span><span class="stat">${t.r}</span></div>`,()=>start(mode,t)));btn('برگشت',mainMenu)}
+function start(mode,t){M={mode,t,a:[],b:[],turn:0,last:null};$('#nb').textContent=t.n;$('#hud').style.display='block';hud();whistle();next()}
+const sum=a=>a.reduce((x,y)=>x+y,0);
+function hud(){$('#sc').textContent=sum(M.b)+' - '+sum(M.a);const f=a=>{const s=a.length>5?a.slice(-5):a;return s.map(v=>v?'🟢':'🔴').join('')+'⚪'.repeat(Math.max(0,5-a.length))};$('#ma').textContent=f(M.a);$('#mb').textContent=f(M.b)}
+function winner(){const a=sum(M.a),b=sum(M.b),na=M.a.length,nb=M.b.length;
+ if(na<=5&&nb<=5){if(a>b+(5-nb))return 1;if(b>a+(5-na))return -1}
+ if(na===nb&&na>=5&&a!==b)return a>b?1:-1;return 0}
+function next(){ui(false);const w=winner();if(w)return end(w);
+ const mine=M.turn%2===0,round=Math.floor(M.turn/2),type=M.mode==='mix'?(round%2?'pen':'fk'):M.mode;
+ M.spot=type==='pen'?{x:0,z:11}:{x:rnd(-9,9),z:rnd(18,23)};
+ setup(type,mine,M.spot);
+ if(mine)choose(type);else{S.state='ready';screen(`<h2>نوبت ${M.t.n}</h2><p style="line-height:2">تو دروازه‌بانی! بعد از ضربه، سریع روی مسیر توپ در دروازه بزن.</p>`);btn('آماده‌ام 🧤',()=>{hide();whistle();S.state='runup';S.t=0;info('منتظر ضربه باش…')},'main')}}
+function setup(type,mine,spot){S.conf=[];Object.assign(S,{type,mine,ball:{x:spot.x,y:.12,z:spot.z},start:{x:spot.x,z:spot.z},trail:[],t:0,flight:null,kick:0,blocked:false,spin:{x:0,y:0},state:'idle'});
+ const dist=Math.hypot(spot.x,spot.z);S.wall=null;let kx=0;
+ if(type==='fk'){const side=spot.x>=0?1:-1,ax=side*1.5-spot.x,az=-spot.z,l=Math.hypot(ax,az),ux=ax/l,uz=az/l;
+  S.wall={x:spot.x+ux*9.15,z:spot.z+uz*9.15,ux,uz,n:dist>21?3:4,j:0};kx=-side*1.1}
+ S.gk={x0:kx,cx:kx,cy:1,a:0,plan:null,t:0};setCam();drawSpin();hud()}
+function choose(type){const key=type==='pen'?'pk':'fk',d=Math.round(Math.hypot(S.start.x,S.start.z));
+ screen(`<h2>${type==='pen'?'پنالتی':'ضربه ایستگاهی از '+d+' متری'}</h2><p>زننده را انتخاب کن</p>`);
+ players.forEach(p=>btn(`<div class="row"><span>${p.num}. ${p.n}${M.last===p?' ✔':''}</span><span class="stat">${type==='pen'?'پنالتی':'کاشته'} ${p[key]}</span></div><div style="font-size:11px;opacity:.65;margin-top:4px">کاشته ${p.fk} | پنالتی ${p.pk}</div>`,()=>{M.last=S.p=p;hide();S.state='aim';ui(true);whistle();info(`${p.n} — از روی توپ به سمت دروازه بکش`)}))}
+function info(s){$('#info').textContent=s}
+function ui(on){$('#spin').style.display=on?'block':'none';$('#power').style.display=on?'block':'none';if(on)$('#power i').style.height='0'}
+function msg(s,col){const m=$('#msg');m.textContent=s;m.style.color=col;m.classList.add('on');setTimeout(()=>m.classList.remove('on'),1500)}
+function end(w){S.state='menu';$('#hud').style.display='none';if(w>0){cheer();confetti()}
+ screen(`<h1>${w>0?'🏆 قهرمان شدی!':'باختی!'}</h1><h2>مهندسی الف ${sum(M.a)} — ${sum(M.b)} ${M.t.n}</h2>`);
+ const mode=M.mode,t=M.t;btn('بازی دوباره',()=>start(mode,t),'main');btn('منوی اصلی',mainMenu)}
+function confetti(){for(let i=0;i<150;i++)S.conf.push({x:rnd(0,W),y:rnd(-H,0),v:rnd(90,230),c:`hsl(${rnd(0,360)},90%,60%)`,p:rnd(0,7)})}
+
+/* شوت: tx,ty هدف روی خط دروازه */
+function shoot(tx,ty,T,bend,lift){S.flight={tx,ty,T,bend,lift,s:{...S.ball}};S.state='fly';S.t=0;S.kick=1;kickSound()}
+function userShot(tx,ty,pw){const p=S.p,fk=S.type==='fk',sk=fk?p.fk:p.pk,sp=S.spin,over=Math.max(0,pw-.85);
+ const err=(100-sk)/100*(fk?1.7:1.2)+over*3;
+ tx+=gauss()*err;ty+=gauss()*err*.5-sp.y*.2+over*2.2;ty=clamp(ty,.12,6);
+ const dist=Math.hypot(S.start.x,S.start.z),T=dist/((14+15*pw+(sk-80)*.15)*(1+Math.max(0,sp.y)*.1));
+ shoot(tx,ty,T,sp.x*(fk?2.8*sk/90:.7),Math.max(0,(fk?1.3:.15)-sp.y*(fk?1.2:.4)));
+ /* تصمیم دروازه‌بان حریف */
+ const r=M.t.r,read=Math.random()<(fk?.25:.12)+(r-70)*.012;
+ const aimX=read?tx+gauss()*(100-r)*.025:(Math.random()<.5?-1:1)*rnd(0,2.8),aimY=read?ty+gauss()*.35:rnd(.4,1.8);
+ dive(aimX,aimY,fk?.34-r*.0015:.12,(fk?3.1:4.2)+(r-75)*.03);
+ if(fk)S.wall.jt=0;ui(false);info('')}
+function oppShot(){const fk=S.type==='fk',r=M.t.r;let tx=(Math.random()<.5?-1:1)*rnd(.3,3.25),ty=rnd(.2,2.1);
+ if(Math.random()<(100-r)*.006){if(Math.random()<.5)tx*=1.4;else ty=rnd(2.7,3.4)}
+ shoot(tx,ty,fk?1.35:.9,fk?(S.start.x>0?1:-1)*rnd(.2,1.4):rnd(-.3,.3),fk?clamp(2.5-ty*.4,1.5,2.4):.15);
+ if(fk)S.wall.jt=0;S.wall&&(S.wall.pass=true);info('بزن روی دروازه!')}
+function dive(x,y,delay,speed){const k=S.gk;x=clamp(x,-3.5,3.5);y=clamp(y,.25,2.35);
+ const dx=x-k.cx,a=clamp(Math.atan2(dx,Math.max(.35,y-.35)),-1.45,1.45),far=Math.min(1,Math.abs(dx)/.8);
+ const ang=a*far,ex=x-Math.sin(ang)*.95,ey=Math.max(.35,y-Math.cos(ang)*.95);
+ k.plan={x0:k.cx,y0:k.cy,a0:k.a,x:ex,y:ey,a:ang,delay,dur:Math.max(.22,Math.hypot(ex-k.cx,ey-k.cy)/speed)};k.t=0}
+function ballAt(u){const f=S.flight,arc=Math.sin(Math.PI*Math.min(u,1));
+ return{x:lerp(f.s.x,f.tx,u)+rt.x*f.bend*arc,y:Math.max(.12,lerp(.12,f.ty,u)+f.lift*arc),z:lerp(f.s.z,0,u)+rt.z*f.bend*arc}}
+function saved(bx,by){const k=S.gk,dx=Math.sin(k.a),dy=Math.cos(k.a),t=clamp((bx-k.cx)*dx+(by-k.cy)*dy,-.85,1.15);return Math.hypot(bx-k.cx-dx*t,by-k.cy-dy*t)<.4}
+function finish(kind){if(S.state!=='fly')return;const goalIn=kind==='goal';S.state='after';S.t=0;
+ (S.mine?M.a:M.b).push(goalIn?1:0);M.turn++;
+ const good=S.mine===goalIn;
+ const txt={goal:S.mine?'گـــــل! ⚽':'گل خوردی',save:S.mine?'دروازه‌بان گرفت':'چه سیوی! 🧤',post:'تیرک!',out:'بیرون رفت',wall:'خورد به دیوار'}[kind];
+ msg(txt,good?'#4dff88':'#ff6b5e');if(goalIn){S.excite=2;S.shake=1;S.hit={x:S.flight.tx,y:S.flight.ty};cheer();if(S.mine)confetti()}else ooh();
+ const b=S.ball,vx=(S.flight.tx-S.start.x)/S.flight.T,vz=-S.start.z/S.flight.T;
+ S.vel=goalIn?{x:vx*.15,y:0,z:-5}:kind==='out'?{x:vx*.5,y:1,z:vz*.35}:{x:-vx*.2+rnd(-3,3),y:rnd(1,4),z:rnd(3,7)};
+ hud();info('')}
+function update(dt){time+=dt;S.excite-=dt;S.shake=Math.max(0,S.shake-dt);S.kick=Math.max(0,S.kick-dt*2.5);
+ if(S.state==='runup'){S.t+=dt;if(S.t>1.3)oppShot()}
+ const k=S.gk,p=k&&k.plan;
+ if(p&&(S.state==='fly'||S.state==='after')){k.t+=dt;const u=clamp((k.t-p.delay)/p.dur,0,1),e=u*(2-u);k.cx=lerp(p.x0,p.x,e);k.cy=lerp(p.y0,p.y,e);k.a=lerp(p.a0,p.a,e);
+  if(S.state==='after'&&u>=1)k.cy=Math.max(.4,k.cy-dt*1.8*Math.abs(Math.sin(k.a)))}
+ if(S.wall&&S.wall.jt!=null){S.wall.jt+=dt;const u=(S.wall.jt-.12)/.6;S.wall.j=u>0&&u<1?Math.sin(u*Math.PI)*.35:0}
+ if(S.state==='fly'){const f=S.flight,old=S.ball;S.t+=dt;const u=Math.min(1,S.t/f.T),n=ballAt(u),w=S.wall;
+  if(w){const s0=(old.x-w.x)*w.ux+(old.z-w.z)*w.uz,s1=(n.x-w.x)*w.ux+(n.z-w.z)*w.uz;
+   if(s0<0&&s1>=0&&!w.pass){const lat=(n.x-w.x)*-w.uz+(n.z-w.z)*w.ux;if(Math.abs(lat)<w.n*.29&&n.y<1.82+w.j){S.ball=n;finish('wall')}}}
+  if(S.state==='fly'){S.ball=n;S.trail.push(n);if(S.trail.length>12)S.trail.shift();
+   if(u>=1){const ax=Math.abs(f.tx),y=f.ty;let r;
+    if(ax<3.55&&y<2.33)r=saved(f.tx,y)?'save':'goal';else if(ax<3.82&&y<2.6)r='post';else r='out';finish(r)}}
+  S.rot+=dt*14}
+ else if(S.state==='after'){S.t+=dt;const b=S.ball,v=S.vel;v.y-=9.8*dt;b.x+=v.x*dt;b.y+=v.y*dt;b.z+=v.z*dt;if(b.y<.12){b.y=.12;v.y*=-.45;v.x*=.85;v.z*=.85}
+  if(b.z<-1.85&&b.z>-3&&Math.abs(b.x)<3.7){b.z=-1.85;v.z=0;v.x*=.5}S.rot+=dt*5;S.trail.shift();
+  if(S.t>2.3){S.state='idle';next()}}}
+function draw(){render();g.clearRect(0,0,W,H);const b=S.ball;
+ const v=g.createRadialGradient(W/2,H*.52,Math.min(W,H)*.4,W/2,H*.52,Math.max(W,H)*.75);v.addColorStop(0,'#0000');v.addColorStop(1,'#000a');g.fillStyle=v;g.fillRect(0,0,W,H);
+ if(drag&&drag.pts.length>1){g.setLineDash([2,10]);g.lineWidth=6;g.lineCap='round';g.strokeStyle='#ffe45c';g.beginPath();drag.pts.forEach(p=>g.lineTo(p.x,p.y));g.stroke();g.setLineDash([]);const e=drag.pts[drag.pts.length-1];g.lineWidth=3;g.beginPath();g.arc(e.x,e.y,13,0,7);g.stroke()}
+ if(S.state==='aim'&&!drag){const p=P(b.x,b.y,b.z);g.strokeStyle=`rgba(255,228,92,${.5+.4*Math.sin(time*5)})`;g.lineWidth=3;g.beginPath();g.arc(p.x,p.y,.17*p.k+12,0,7);g.stroke()}
+ for(const c of S.conf){g.fillStyle=c.c;g.fillRect(c.x+Math.sin(time*4+c.p)*14,c.y,7,4+Math.abs(Math.sin(time*8+c.p))*7)}}
+/* ---------- لمس ---------- */
+let drag=null;
+function power(pts){const a=pts[0],b=pts[pts.length-1],dt=Math.max(60,b.t-a.t)/1000,v=Math.hypot(b.x-a.x,b.y-a.y)/H/dt;return clamp((v-.25)/1.9,.05,1)}
+cv.addEventListener('pointerdown',e=>{e.preventDefault();audio();const x=e.clientX,y=e.clientY;
+ if(S.state==='aim'){const p=P(S.ball.x,S.ball.y,S.ball.z);if(Math.hypot(x-p.x,y-p.y)<Math.max(60,.17*p.k+30)){drag={id:e.pointerId,pts:[{x,y,t:performance.now()}]};cv.setPointerCapture(e.pointerId)}}
+ else if(S.state==='fly'&&!S.mine&&!S.gk.plan){const side=(x-W/2)/F,dz=fw.z+rt.z*side,t=-cam.z/dz,gx=cam.x+(fw.x+rt.x*side)*t,gy=cam.y+(HZ-y)/F*t;dive(gx,gy,.03,7.5);S.tap={x,y}}});
+cv.addEventListener('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;drag.pts.push({x:e.clientX,y:e.clientY,t:performance.now()});$('#power i').style.height=power(drag.pts)*100+'%'});
+cv.addEventListener('pointerup',e=>{if(!drag||e.pointerId!==drag.id)return;drag.pts.push({x:e.clientX,y:e.clientY,t:performance.now()});const pts=drag.pts;drag=null;
+ const a=pts[0],b=pts[pts.length-1];if(a.y-b.y<H*.07){info('بیشتر به سمت دروازه بکش');return}
+ const pw=power(pts);$('#power i').style.height=pw*100+'%';
+ /* اگر کشیدن کوتاه بود، مسیر تا خط دروازه ادامه می‌یابد */
+ let x=b.x,y=b.y;const base=P(0,0,0).y;if(y>base){const m=(a.y-base)/(a.y-b.y);x=a.x+(b.x-a.x)*m;y=base}
+ const side=(x-W/2)/F,t=-cam.z/(fw.z+rt.z*side);userShot(cam.x+(fw.x+rt.x*side)*t,Math.max(.12,cam.y+(HZ-y)/F*t),pw)});
+cv.addEventListener('pointercancel',()=>drag=null);
+
+const sc=$('#spin canvas'),sg=sc.getContext('2d');
+function drawSpin(){sg.clearRect(0,0,208,208);
+ let q=sg.createRadialGradient(75,70,10,104,104,100);q.addColorStop(0,'#fff');q.addColorStop(1,'#9aa5b3');sg.fillStyle=q;sg.beginPath();sg.arc(104,104,98,0,7);sg.fill();
+ sg.strokeStyle='#0003';sg.lineWidth=3;sg.beginPath();sg.moveTo(104,10);sg.lineTo(104,198);sg.moveTo(10,104);sg.lineTo(198,104);sg.stroke();
+ sg.beginPath();for(let i=0;i<5;i++){const a=i*1.2566-1.5708;sg.lineTo(104+Math.cos(a)*38,104+Math.sin(a)*38)}sg.closePath();sg.fillStyle='#0002';sg.fill();
+ const x=104+S.spin.x*76,y=104-S.spin.y*76;sg.fillStyle='#e53935';sg.beginPath();sg.arc(x,y,17,0,7);sg.fill();sg.strokeStyle='#fff';sg.lineWidth=5;sg.stroke()}
+function setSpin(e){const r=sc.getBoundingClientRect();let x=(e.clientX-r.left)/r.width*2-1,y=1-(e.clientY-r.top)/r.height*2;x/=.73;y/=.73;const l=Math.max(1,Math.hypot(x,y));S.spin={x:x/l,y:y/l};drawSpin()}
+sc.addEventListener('pointerdown',e=>{e.preventDefault();sc.setPointerCapture(e.pointerId);setSpin(e)});
+sc.addEventListener('pointermove',e=>{if(e.buttons)setSpin(e)});
+
+let last=0;
+function loop(now){const dt=Math.min(.033,(now-last)/1000||0);last=now;update(dt);
+ for(const c of S.conf)c.y+=c.v*dt;S.conf=S.conf.filter(c=>c.y<H);draw();requestAnimationFrame(loop)}
+S.gk={x0:0,cx:0,cy:1,a:0,plan:null,t:0};
+if(!gl){document.body.innerHTML='<p style="padding:30px">گوشی از WebGL2 پشتیبانی نمی‌کند. Android System WebView را به‌روز کنید.</p>';throw Error('no webgl2')}
+initGL();addEventListener('resize',resize);resize();mainMenu();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
